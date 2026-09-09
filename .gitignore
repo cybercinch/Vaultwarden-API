@@ -43,6 +43,7 @@ credentials/
 
 # Testing
 coverage.out
+coverage.html
 *.coverprofile
 
 # Logs

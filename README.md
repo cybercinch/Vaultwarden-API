@@ -18,12 +18,26 @@ provider in our [dockhand fork](https://github.com/cybercinch/dockhand).
 | Change | Files |
 |--------|-------|
 | **`GET /secrets`** — list item summaries (name, id, org/collection/folder ids + names, custom-field names) **without any values**. Honours the same query filters and API-key scope as `GET /secret/:name`; `Cache-Control: no-store`; returns `404` (no existence leak) when a scoped key resolves to nothing. Needed for Dockhand's test-connection and bulk pull. | `internal/vaultwarden/client.go` (`ListSecrets`), `internal/handlers/handlers.go` (`ListSecrets`), `cmd/api/main.go` (route), `internal/handlers/handlers_test.go` |
+| Replace the `Makefile` with a `justfile` (all the old targets plus a **multi-arch** `push` — the Vaultwarden stack this backs runs on arm64). | `justfile` (new), `Makefile` (removed) |
 
 **Planned (not yet in this branch):** a `generation` change-counter +
 `GET /secrets/generation` for cheap poll-skip; `revision_date` on each summary;
 persisting a stable `deviceIdentifier` + refresh token across restarts so a
 recycled container is a *known* device and Vaultwarden stops emailing
 "New Device Logged In".
+
+### Build & release (this fork)
+
+```sh
+just                 # list recipes
+just test            # go test -race + coverage
+just build           # native-arch image -> vaultwarden-api:local
+just login           # docker login hub.cybercinch.nz
+just push            # multi-arch (amd64+arm64) -> hub.cybercinch.nz/cybercinch/vaultwarden-api:<git describe> + :latest
+just sync-upstream   # fast-forward main to upstream
+```
+
+Override the registry: `just registry=ghcr.io/cybercinch push`.
 
 ---
 
