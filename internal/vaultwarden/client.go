@@ -342,6 +342,75 @@ func (c *Client) lookupFailure(name, key string, visible int, filter SecretFilte
 	return e
 }
 
+// SecretSummary describes one vault item WITHOUT its value. It is the element
+// type of the GET /secrets listing: enough for an operator (or Dockhand) to see
+// what exists and where it lives, with the secret itself never included.
+type SecretSummary struct {
+	Name             string   `json:"name"`
+	ID               string   `json:"id"`
+	OrganizationID   string   `json:"organization_id"`
+	OrganizationName string   `json:"organization_name"`
+	CollectionIDs    []string `json:"collection_ids"`
+	CollectionNames  []string `json:"collection_names"`
+	FolderID         string   `json:"folder_id"`
+	FolderName       string   `json:"folder_name"`
+	// Fields lists the names of the item's custom fields (values omitted), so an
+	// operator can see which field extractSecret would pick.
+	Fields []string `json:"fields"`
+}
+
+// ListSecrets returns a value-free summary of every cached item that satisfies
+// filter, sorted by name then cipher id for a stable order. The same filter
+// rules as GetSecret apply: the singular fields are the caller's query filters
+// and the plural fields are the authenticated key's scope, and an item must
+// match both. Values are never read or returned.
+func (c *Client) ListSecrets(filter SecretFilter) []SecretSummary {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	out := make([]SecretSummary, 0, len(c.items))
+	for _, item := range c.items {
+		if !matchesSecretFilter(item, filter) {
+			continue
+		}
+
+		s := SecretSummary{
+			Name:           item.Name,
+			ID:             item.ID,
+			OrganizationID: item.OrganizationID,
+			FolderID:       item.FolderID,
+			CollectionIDs:  append([]string{}, item.CollectionIDs...),
+		}
+		if n, ok := c.nameMaps.Organizations[item.OrganizationID]; ok {
+			s.OrganizationName = n
+		}
+		if n, ok := c.nameMaps.Folders[item.FolderID]; ok {
+			s.FolderName = n
+		}
+		s.CollectionNames = make([]string, 0, len(item.CollectionIDs))
+		for _, cid := range item.CollectionIDs {
+			if n, ok := c.nameMaps.Collections[cid]; ok {
+				s.CollectionNames = append(s.CollectionNames, n)
+			}
+		}
+		s.Fields = make([]string, 0, len(item.Fields))
+		for name := range item.Fields {
+			s.Fields = append(s.Fields, name)
+		}
+		sort.Strings(s.Fields)
+
+		out = append(out, s)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
 // ClearCache triggers a fresh vault sync.
 func (c *Client) ClearCache() {
 	if err := c.syncVault(); err != nil {

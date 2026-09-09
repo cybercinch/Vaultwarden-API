@@ -126,6 +126,40 @@ func (h *Handler) GetSecret(c *fiber.Ctx) error {
 	})
 }
 
+// ListSecrets handles GET /secrets.
+//
+// It returns a value-free summary of every vault item visible to the caller,
+// honouring the same query filters as GET /secret/:name and the authenticated
+// key's scope. Secret values are never read or returned, so the response is safe
+// to enumerate; it is still marked no-store so an intermediary does not retain
+// the item inventory.
+func (h *Handler) ListSecrets(c *fiber.Ctx) error {
+	denyCaching(c)
+
+	filter, err := h.parseSecretFilters(c)
+	if err != nil {
+		logger.Warn.Printf("Invalid secret filters attempted from IP: %s - %v", realip.FromCtx(c), err)
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "not found",
+		})
+	}
+
+	// Enforce the authenticated key's scope server-side, regardless of query filters.
+	if denial, ok := h.applyKeyScope(c, &filter); !ok {
+		logger.Warn.Printf("Secret list denied (%s, IP %s): %s",
+			describeKey(c), realip.FromCtx(c), denial)
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "not found",
+		})
+	}
+
+	secrets := h.vaultClient.ListSecrets(filter)
+	return c.JSON(fiber.Map{
+		"count":   len(secrets),
+		"secrets": secrets,
+	})
+}
+
 // logSecretLookupFailure records why a lookup missed, for the operator only.
 //
 // The response tells a caller nothing beyond "not found": letting a scoped key

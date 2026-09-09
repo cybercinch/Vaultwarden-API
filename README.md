@@ -100,8 +100,46 @@ You can also use **custom fields** or **notes** — the API returns the most rel
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/health` | No | Health check |
+| `GET` | `/secrets` | API Key | List item summaries (no values) — see below |
 | `GET` | `/secret/:name` | API Key | Fetch a secret by name |
 | `POST` | `/refresh` | API Key | Force vault re-sync |
+
+### `GET /secrets`
+
+Enumerate the vault **without** transferring any secret values — for tooling that
+needs to know what exists (e.g. Dockhand's "test connection" and bulk pull).
+
+```
+GET /secrets
+GET /secrets?organization_name=Infra&collection_name=prod
+Authorization: <api key>
+```
+
+```json
+{
+  "count": 1,
+  "secrets": [
+    {
+      "name": "POSTGRES_PASSWORD",
+      "id": "9f0c…",
+      "organization_id": "…", "organization_name": "Infra",
+      "collection_ids": ["…"], "collection_names": ["prod"],
+      "folder_id": "", "folder_name": "",
+      "fields": ["value"]
+    }
+  ]
+}
+```
+
+- Never includes secret values; `Cache-Control: no-store`.
+- Honours the same `organization_*` / `collection_*` / `folder_*` query filters
+  as `GET /secret/:name`.
+- Honours the authenticated key's scope — a scoped key lists only its slice, and
+  a key whose scope resolves to nothing gets the same `404` as a bad filter (no
+  existence leak).
+- `fields` lists the item's custom-field **names** (values omitted), so you can
+  see which field `extractSecret` would pick.
+- `revision_date` / a `generation` change-counter are planned (not yet emitted).
 
 ## Configuration
 

@@ -143,6 +143,7 @@ func main() {
 	}))
 	api.Use(auth.Middleware(auth.NewStore(cfg.APIKeys)))
 
+	api.Get("/secrets", h.ListSecrets)
 	api.Get("/secret/:name", h.GetSecret)
 	api.Post("/refresh", h.RefreshCache)
 

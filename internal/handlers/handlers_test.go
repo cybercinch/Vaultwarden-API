@@ -355,6 +355,114 @@ func TestGetSecret(t *testing.T) {
 // TestGetSecretFailsClosedWithoutAuth verifies that if the handler is reached
 // without the auth middleware (no scope in context), it denies rather than
 // granting full access.
+func TestListSecrets(t *testing.T) {
+	const (
+		fullKey = "list-full-access-0000000000000000000000000"
+		colKey  = "list-collection-scoped-11111111111111111111"
+		badKey  = "list-bad-scope-33333333333333333333333333333"
+	)
+	h := NewHandler(vaultwarden.NewClient(nil, 0, vaultwarden.WithState(testVaultItems(), testNameMaps())))
+	store := auth.NewStore([]auth.APIKey{
+		{Name: "full", Key: fullKey},
+		{Name: "dev", Key: colKey, Scope: auth.Scope{Collections: []string{"Shared"}}},
+		{Name: "broken", Key: badKey, Scope: auth.Scope{Collections: []string{"Nonexistent"}}},
+	})
+	app := fiber.New()
+	app.Use(auth.Middleware(store))
+	app.Get("/secrets", h.ListSecrets)
+
+	type listResp struct {
+		Count   int                         `json:"count"`
+		Secrets []vaultwarden.SecretSummary `json:"secrets"`
+	}
+	do := func(t *testing.T, key, query string) (*http.Response, listResp) {
+		t.Helper()
+		url := "/secrets"
+		if query != "" {
+			url += "?" + query
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("app.Test: %v", err)
+		}
+		var parsed listResp
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		_ = json.Unmarshal(body, &parsed)
+		return resp, parsed
+	}
+
+	t.Run("full key lists everything, sorted, no values", func(t *testing.T) {
+		resp, out := do(t, fullKey, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		if out.Count != 3 || len(out.Secrets) != 3 {
+			t.Fatalf("count = %d, secrets = %d, want 3/3", out.Count, len(out.Secrets))
+		}
+		if out.Secrets[0].Name != "db-password" || out.Secrets[1].Name != "my secret" || out.Secrets[2].Name != "other-password" {
+			t.Errorf("unsorted: %q, %q, %q", out.Secrets[0].Name, out.Secrets[1].Name, out.Secrets[2].Name)
+		}
+		if out.Secrets[0].OrganizationName != "Acme" || out.Secrets[0].FolderName != "Work" {
+			t.Errorf("names not resolved: %+v", out.Secrets[0])
+		}
+		if len(out.Secrets[0].CollectionNames) != 1 || out.Secrets[0].CollectionNames[0] != "Shared" {
+			t.Errorf("collection names: %+v", out.Secrets[0].CollectionNames)
+		}
+		// Value must never appear in the marshalled body.
+		raw, _ := json.Marshal(out.Secrets)
+		if strings.Contains(string(raw), "s3cret") || strings.Contains(string(raw), "partial") {
+			t.Errorf("secret value leaked into listing: %s", raw)
+		}
+	})
+
+	t.Run("query filter narrows", func(t *testing.T) {
+		_, out := do(t, fullKey, "organization_name=Acme")
+		if out.Count != 1 || out.Secrets[0].Name != "db-password" {
+			t.Errorf("filter not applied: %+v", out)
+		}
+	})
+
+	t.Run("scoped key only sees its slice", func(t *testing.T) {
+		_, out := do(t, colKey, "")
+		if out.Count != 1 || out.Secrets[0].Name != "db-password" {
+			t.Errorf("scope not enforced: %+v", out)
+		}
+	})
+
+	t.Run("unresolved scope denies with 404", func(t *testing.T) {
+		resp, _ := do(t, badKey, "")
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("no auth middleware fails closed", func(t *testing.T) {
+		bare := fiber.New()
+		bare.Get("/secrets", h.ListSecrets)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/secrets", nil)
+		resp, err := bare.Test(req, -1)
+		if err != nil {
+			t.Fatalf("app.Test: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want 404 (fail closed)", resp.StatusCode)
+		}
+	})
+
+	t.Run("no-store header set", func(t *testing.T) {
+		resp, _ := do(t, fullKey, "")
+		if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+			t.Errorf("Cache-Control = %q, want no-store", cc)
+		}
+	})
+}
+
 func TestGetSecretFailsClosedWithoutAuth(t *testing.T) {
 	h := NewHandler(vaultwarden.NewClient(nil, 0, vaultwarden.WithState(testVaultItems(), testNameMaps())))
 	app := fiber.New()
