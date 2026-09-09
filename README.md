@@ -2,6 +2,31 @@
 
 > **Stop using `.env` files.** Fetch secrets directly from your self-hosted [Vaultwarden](https://github.com/dani-garcia/vaultwarden) instance at runtime.
 
+---
+
+## 🍴 Cybercinch fork
+
+Private fork of [`Turbootzz/Vaultwarden-API`](https://github.com/Turbootzz/Vaultwarden-API)
+maintained by Cybercinch Solutions, primarily to back the `vaultwarden` secret
+provider in our [dockhand fork](https://github.com/cybercinch/dockhand).
+
+- **`main`** tracks upstream unchanged, for clean syncing.
+- **`cybercinch`** (this branch, the default) carries our changes on top of `main`.
+
+### Differences from upstream
+
+| Change | Files |
+|--------|-------|
+| **`GET /secrets`** — list item summaries (name, id, org/collection/folder ids + names, custom-field names) **without any values**. Honours the same query filters and API-key scope as `GET /secret/:name`; `Cache-Control: no-store`; returns `404` (no existence leak) when a scoped key resolves to nothing. Needed for Dockhand's test-connection and bulk pull. | `internal/vaultwarden/client.go` (`ListSecrets`), `internal/handlers/handlers.go` (`ListSecrets`), `cmd/api/main.go` (route), `internal/handlers/handlers_test.go` |
+
+**Planned (not yet in this branch):** a `generation` change-counter +
+`GET /secrets/generation` for cheap poll-skip; `revision_date` on each summary;
+persisting a stable `deviceIdentifier` + refresh token across restarts so a
+recycled container is a *known* device and Vaultwarden stops emailing
+"New Device Logged In".
+
+---
+
 A lightweight, production-ready Go API that acts as a secrets bridge between your apps and Vaultwarden. No more scattered `.env` files, no more accidentally committed credentials.
 
 ## ✨ Highlights
