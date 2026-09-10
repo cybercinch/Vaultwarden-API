@@ -15,10 +15,25 @@ provider in our [dockhand fork](https://github.com/cybercinch/dockhand).
 
 ### Differences from upstream
 
+#### API
+
 | Change | Files |
 |--------|-------|
 | **`GET /secrets`** — list item summaries (name, id, org/collection/folder ids + names, custom-field names) **without any values**. Honours the same query filters and API-key scope as `GET /secret/:name`; `Cache-Control: no-store`; returns `404` (no existence leak) when a scoped key resolves to nothing. Needed for Dockhand's test-connection and bulk pull. | `internal/vaultwarden/client.go` (`ListSecrets`), `internal/handlers/handlers.go` (`ListSecrets`), `cmd/api/main.go` (route), `internal/handlers/handlers_test.go` |
-| Replace the `Makefile` with a `justfile` (all the old targets plus a **multi-arch** `push` — the Vaultwarden stack this backs runs on arm64). | `justfile` (new), `Makefile` (removed) |
+
+#### Runtime & observability
+
+| Change | Files |
+|--------|-------|
+| **Access log** — one line per request on stdout (method, path, status, latency, resolved client + forwarded chain, API-key name). Sits outside the whitelist/auth middleware so `401`/`403`/`429` are logged too; `/health` is excluded. New `ACCESS_LOG` env var, default `true`. | `cmd/api/main.go` (`accessLog`), `internal/config/config.go` (`AccessLog`), `cmd/api/main_test.go`, `.env.example` |
+| **Embedded tzdata** — `_ "time/tzdata"` compiled in, so `TZ` and `time.LoadLocation` work on the bare Alpine runtime image (no `tzdata` package). Unset `TZ` = UTC. | `cmd/api/main.go` (blank import), `.env.example` |
+
+#### Build & release
+
+| Change | Files |
+|--------|-------|
+| Replace the `Makefile` with a `justfile` (all the old targets plus a **multi-arch** `push` — the Vaultwarden stack this backs runs on arm64). Ignore `coverage.html` from `just test`. | `justfile` (new), `Makefile` (removed), `.gitignore` |
+| **Cross-arch build fix** — `ARG TARGETOS` / `ARG TARGETARCH` are bare re-declarations, not `=linux` / `=amd64` defaults. A literal default shadows BuildKit's per-platform value, so the old Dockerfile built an amd64 binary for *every* platform and the arm64 image failed with `exec format error`. | `Dockerfile` |
 
 **Planned (not yet in this branch):** a `generation` change-counter +
 `GET /secrets/generation` for cheap poll-skip; `revision_date` on each summary;
@@ -32,8 +47,9 @@ recycled container is a *known* device and Vaultwarden stops emailing
 just                 # list recipes
 just test            # go test -race + coverage
 just build           # native-arch image -> vaultwarden-api:local
-just login           # docker login hub.cybercinch.nz
-just push            # multi-arch (amd64+arm64) -> hub.cybercinch.nz/cybercinch/vaultwarden-api:<git describe> + :latest
+just login           # docker login docker.io/cybercinch
+just push            # multi-arch (amd64+arm64) -> docker.io/cybercinch/vaultwarden-api:<git describe> + :latest
+just tag=v1.4.0 push-tag   # push one explicit tag, multi-arch
 just sync-upstream   # fast-forward main to upstream
 ```
 
@@ -206,6 +222,7 @@ Authorization: <api key>
 | `TRUSTED_PROXY_PRESET` | No | — | Comma-separated provider presets whose ranges are added to the trusted set. Only `cloudflare` today. **Not needed for a normal Cloudflare deployment** — that works out of the box; see [Behind a CDN](#behind-a-cdn-cloudflare). An unknown name aborts startup |
 | `ENVIRONMENT` | No | `development` | Set to `production` to hide errors |
 | `DEBUG` | No | `false` | Enable debug logging |
+| `ACCESS_LOG` | No | `true` | One line per request on stdout (method, path, status, latency, resolved client, key name). `/health` is excluded. Set `false` to disable |
 
 \* At least one of `API_KEY`, `API_KEYS`, or `API_KEYS_FILE` is required.
 
