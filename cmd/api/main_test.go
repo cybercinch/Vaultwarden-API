@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/Turbootzz/vaultwarden-api/pkg/logger"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
 )
@@ -83,6 +85,44 @@ func TestSecretResponsesAreNotCompressed(t *testing.T) {
 					resp.Header.Get("Content-Encoding"), gotCompressed, tt.wantCompressed)
 			}
 		})
+	}
+}
+
+func TestAccessLog(t *testing.T) {
+	var buf bytes.Buffer
+	orig := logger.Info.Writer()
+	logger.Info.SetOutput(&buf)
+	t.Cleanup(func() { logger.Info.SetOutput(orig) })
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(accessLog())
+	app.Get("/health", func(c *fiber.Ctx) error { return c.SendString("ok") })
+	app.Get("/secret/:name", func(c *fiber.Ctx) error { return c.SendString("value") })
+	app.Get("/boom", func(c *fiber.Ctx) error { return fiber.ErrForbidden })
+
+	do := func(path string) {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("app.Test(%q): %v", path, err)
+		}
+		resp.Body.Close()
+	}
+
+	do("/health")
+	if buf.Len() != 0 {
+		t.Fatalf("/health produced an access log line: %q", buf.String())
+	}
+
+	do("/secret/db")
+	if got := buf.String(); !strings.Contains(got, "access 200 GET /secret/db") {
+		t.Errorf("served request log = %q, want it to mention `access 200 GET /secret/db`", got)
+	}
+
+	buf.Reset()
+	do("/boom")
+	if got := buf.String(); !strings.Contains(got, "access 403 GET /boom") {
+		t.Errorf("denied request log = %q, want it to mention `access 403 GET /boom`", got)
 	}
 }
 

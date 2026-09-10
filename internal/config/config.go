@@ -35,6 +35,9 @@ type Config struct {
 	// Performance
 	CORSAllowedOrigins string
 
+	// Observability
+	AccessLog bool
+
 	// Rate limiting
 	RateLimitMax    int
 	RateLimitWindow time.Duration
@@ -52,6 +55,8 @@ func Load() (*Config, error) {
 		ReadTimeout:        parseDuration(os.Getenv("READ_TIMEOUT"), "10s"),
 		WriteTimeout:       parseDuration(os.Getenv("WRITE_TIMEOUT"), "10s"),
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
+
+		AccessLog: parseBool("ACCESS_LOG", true),
 
 		EnableGitHubIPRanges: parseBool("ENABLE_GITHUB_IP_RANGES", false),
 

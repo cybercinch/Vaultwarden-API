@@ -108,6 +108,11 @@ func main() {
 	app.Use(recover.New())
 	// Must precede every middleware that makes a decision on the client IP.
 	app.Use(realip.Middleware(ipResolver))
+	// Outside the whitelist and auth middleware on purpose: a denied request
+	// (401/403/429) is exactly the line that shows who is knocking.
+	if cfg.AccessLog {
+		app.Use(accessLog())
+	}
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelBestSpeed,
 		// Secret responses mix a caller-supplied name with the secret itself;
@@ -272,6 +277,47 @@ func validateIPOrCIDR(s string) error {
 		return fmt.Errorf("invalid IP address")
 	}
 	return nil
+}
+
+// accessLog writes one line per request to stdout: the resolved client, what it
+// asked for, and how it went. It runs the rest of the chain, then reports the
+// status the response (or the pending error) will carry, so denied requests are
+// logged alongside served ones.
+//
+// /health is skipped: the container's own health probe hits it every few seconds
+// and would otherwise bury real traffic.
+func accessLog() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Path() == "/health" {
+			return c.Next()
+		}
+
+		start := time.Now()
+		err := c.Next()
+
+		status := c.Response().StatusCode()
+		if err != nil {
+			// The error handler runs after this returns, so the response still
+			// carries its default status here; take the code it will set.
+			status = fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				status = e.Code
+			}
+		}
+
+		caller := "-"
+		if name, ok := auth.KeyNameFromCtx(c); ok && name != "" {
+			caller = name
+		}
+
+		logger.Info.Printf("access %d %s %s %s caller=%s ua=%q %s",
+			status, c.Method(), c.OriginalURL(),
+			time.Since(start).Round(time.Millisecond),
+			caller, string(c.Request().Header.UserAgent()),
+			realip.ResolutionFromCtx(c))
+
+		return err
+	}
 }
 
 // customErrorHandler creates a custom error handler.
