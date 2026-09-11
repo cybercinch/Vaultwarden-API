@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -17,9 +17,11 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     ./cmd/api
 
 # Runtime stage — pure Alpine, no Node.js
-FROM alpine:3.24
+FROM alpine:20260805
 
-RUN apk --no-cache add ca-certificates wget && \
+RUN apk update && \
+    apk upgrade && \
+    apk add --no-cache ca-certificates wget && \
     adduser -D -H appuser
 
 WORKDIR /app
